@@ -7,6 +7,41 @@
 
 static const float PI = 3.1415926535f;
 static float seconds_offset = 0.0f;
+
+static pv_porcupine_object_t* porcupine = NULL;
+static int porcupine_frame_length = 0;
+static int porcupine_input_buffer_size = 0;
+static int16_t* porcupine_input_buffer = NULL;
+
+static void setup_porcupine() {
+    porcupine_frame_length = pv_porcupine_frame_length();
+    porcupine_input_buffer_size = sizeof(int16_t) * porcupine_frame_length;
+    porcupine_input_buffer = (int16_t*)malloc(porcupine_input_buffer_size);
+    memset(porcupine_input_buffer, 0, porcupine_input_buffer_size);
+    if (porcupine_input_buffer == NULL) {
+        fprintf(stderr, "Failed to allocate buffer for porcupine input");
+        exit(1);
+    }
+    pv_status_t status = pv_porcupine_init(
+        NULL,
+        "/usr/local/lib/python3.7/site-packages/pvporcupine/resources/keyword_files/linux/porcupine_linux.ppn",
+        0.6,
+        &porcupine
+    );
+
+    if (status != PV_STATUS_SUCCESS) {
+        const char* error = 
+            (status = PV_STATUS_IO_ERROR) ? "IO ERROR" :
+            (status = PV_STATUS_INVALID_ARGUMENT) ? "INVALID ARGUMENT" :
+            (status = PV_STATUS_OUT_OF_MEMORY) ? "OUT OF MEMORY" :
+            "UNKNOWN";
+        fprintf(stderr, "Reported error from porcupine: %s", error);
+        // exit(2);
+    }
+}
+
+
+// assumes setup_porcupine previously called
 static void read_callback(struct SoundIoInStream *instream,
         int frame_count_min, int frame_count_max)
 {
@@ -24,8 +59,39 @@ static void read_callback(struct SoundIoInStream *instream,
           fprintf(stderr, "%s\n", soundio_strerror(res));
           exit(1);
         }
+        int desired_num_samples = porcupine_input_buffer_size / instream->bytes_per_frame;
+        static int porcupine_input_offset = 0;
+        if (areas != NULL) {
+            for (int f = 0; f < frame_count; ++f) {
+                for (int ch = 0; ch < 1/* only want 1 channel */; ++ch) {
+                    if (porcupine_input_offset*2 + instream->bytes_per_frame > porcupine_input_buffer_size) {
+                        bool success = false;
+                        int status = pv_porcupine_process(porcupine, porcupine_input_buffer, &success);
+                        if (status) {
+                            const char* msg = 
+                                status == PV_STATUS_OUT_OF_MEMORY ? "OUT OF MEM" : 
+                                status == PV_STATUS_INVALID_ARGUMENT ? "INVALID ARG" : "UNKNOWN";
+                            fprintf(stderr, "PORCUPINE FAILED TO PROCESS %s\n", msg);
+                        }
+                        if (success) {
+                            fprintf(stdout, "DETECTED");
+                        }
+                        porcupine_input_offset = 0;
+                        memset(porcupine_input_buffer, 0, porcupine_input_buffer_size);
+                    }
+                    memcpy(
+                         porcupine_input_buffer + porcupine_input_offset,
+                         areas[ch].ptr,
+                         instream->bytes_per_frame
+                    );
+                    porcupine_input_offset += (instream->bytes_per_frame / 2); // offset in 2byte sizes
+                    areas[ch].ptr += areas[ch].step;
+                }
+            }
+                    
+        }
 
-        frames_left -= res;
+        frames_left -= frame_count;
 
         res = soundio_instream_end_read(instream);
         if (res == SoundIoErrorStreaming) {
@@ -39,6 +105,7 @@ static void read_callback(struct SoundIoInStream *instream,
 }
 
 int main(int argc, char **argv) {
+    setup_porcupine();
     int err;
     struct SoundIo *soundio = soundio_create();
     if (!soundio) {

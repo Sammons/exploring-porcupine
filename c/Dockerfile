@@ -8,6 +8,7 @@ RUN pip install pvporcupine
 COPY pv_porcupine.h picovoice.h /libsoundio/custom/
 COPY main.c /libsoundio/custom/main.c
 
-ENV LD_LIBRARY_PATH=/libsoundio/build
-# RUN cd /libsoundio/custom/ && g++ -std=c++1y main.c -lm -lsoundio && cp ./a.out ../build
+ENV PORCUPINE_LIB_FOLDER=/usr/local/lib/python3.7/site-packages/pvporcupine/lib/linux/x86_64/
+ENV LD_LIBRARY_PATH=/libsoundio/build:${PORCUPINE_LIB_FOLDER}
+RUN cd /libsoundio/custom/ && g++ -std=c++1y main.c -lsoundio -L${PORCUPINE_LIB_FOLDER} -l:libpv_porcupine.so && cp ./a.out ../build
 # ENTRYPOINT /libsoundio/build/a.out

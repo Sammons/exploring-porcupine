@@ -1,14 +1,17 @@
 FROM python:3.7-buster
 
-RUN apt-get update && apt-get install -y portaudio19-dev python-pyaudio python3-pyaudio make cmake gcc
-RUN git clone https://github.com/andrewrk/libsoundio /libsoundio && cd /libsoundio && mkdir build && cd build && cmake .. && make && make install
-
+RUN apt-get update && apt-get install -y portaudio19-dev python-pyaudio python3-pyaudio make gcc libasound-dev
 RUN pip install pvporcupine
 
-COPY pv_porcupine.h picovoice.h /libsoundio/custom/
-COPY main.c /libsoundio/custom/main.c
+RUN git clone https://git.assembla.com/portaudio.git /portaudio && cd /portaudio && ./configure && make && make install;
+
+
+COPY include/ /workdir/include/
+COPY main.c /workdir/main.c
 
 ENV PORCUPINE_LIB_FOLDER=/usr/local/lib/python3.7/site-packages/pvporcupine/lib/linux/x86_64/
-ENV LD_LIBRARY_PATH=/libsoundio/build:${PORCUPINE_LIB_FOLDER}
-RUN cd /libsoundio/custom/ && g++ -std=c++1y main.c -lsoundio -L${PORCUPINE_LIB_FOLDER} -l:libpv_porcupine.so && cp ./a.out ../build
+ENV PORTAUDIO_LIB_FOLDER=/portaudio/lib/.libs
+ENV LD_LIBRARY_PATH=${LD_LIBRARY_PATH}:${PORCUPINE_LIB_FOLDER}:${PORTAUDIO_LIB_FOLDER}
+RUN cd workdir && g++ -std=c++1y main.c -lrt -lm -lasound -ljack -pthread -L${PORCUPINE_LIB_FOLDER} -l:libpv_porcupine.so -L${PORTAUDIO_LIB_FOLDER} -l:libportaudio.so
+
 # ENTRYPOINT /libsoundio/build/a.out

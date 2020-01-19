@@ -1,4 +1,5 @@
 import pvporcupine
+from rhino import Rhino
 from datetime import datetime
 import pyaudio, time, struct
 
@@ -11,7 +12,7 @@ if host_device_count == 0:
 else:
   print('Identified', host_device_count, 'devices')
 
-target_device_name = 'C920'
+target_device_name = 'Jabra'
 target_device_desc = None
 for idx in range(0, host_device_count):
   desc = pa.get_device_info_by_index(idx)
@@ -25,24 +26,49 @@ if target_device_desc == None:
   exit(1)
 
 
-handle = pvporcupine.create(
+porcupine_handle = pvporcupine.create(
   keywords=['computer'],
   sensitivities=[0.9]
 )
-frame_len = handle.frame_length
+rhino_handle = Rhino(
+  context_file_path="/host_disk/src/rhino.rhn",
+  model_file_path="/host_disk/src/rhino.pv",
+  library_path="/host_disk/src/libpv_rhino.so"
+)
+frame_len = porcupine_handle.frame_length
 
+g = {}
+g['woke'] = False
+g['timer'] = time.time()
+g['intent'] = False
 def _audio_callback(in_data, frame_count, time_info, status):
   if frame_count >= frame_len:
     pcm = struct.unpack_from("h" * frame_len, in_data)
-    result = handle.process(pcm)
-    if result:
-      print('found', result)
+    should_wake = porcupine_handle.process(pcm)
+    if should_wake and not g['intent']:
+      g['woke'] = True
+      g['timer'] = time.time()
+      print('Listening')
+    expired = time.time() - g['timer'] > 5
+    if not should_wake and not g['intent'] and g['woke'] and expired:
+      g['woke'] = False
+      print('Stopped listening')
+    if g['woke']:
+      g['intent'] = rhino_handle.process(pcm)
+    if g['intent']:
+      if rhino_handle.is_understood():
+        g['intent'], slot_values = rhino_handle.get_intent()
+        print(g['intent'], slot_values)
+      rhino_handle.reset()
+      g['intent'] = False
+      g['woke'] = False
+
   return None, pyaudio.paContinue
 
 stream = pa.open(
 channels=1,
 format=pyaudio.paInt16,
-rate=handle.sample_rate,
+rate=porcupine_handle.sample_rate,
 frames_per_buffer=frame_len,
 input=True,
 input_device_index=target_device_desc['index'],
